@@ -1,0 +1,168 @@
+/*
+ * File:   Demo_3.c
+ * Author: TeamRocket
+ *
+ * Created on November 15, 2021, 1:20 PM
+ */
+
+
+#include "xc.h"
+#pragma config FNOSC = FRC
+#define FORWARD 0
+#define BACK 1
+#define READY 1
+#define WORKING 0
+
+double steps = 0;
+double endSteps = 0;
+int state = READY;
+
+void __attribute__((interrupt, no_auto_psv)) _OC1Interrupt(void)
+{   
+    _OC1IF = 0;  // Clear interrupt flag
+
+    if (steps < endSteps) {                   // Forward
+        steps = steps + 1.0;
+    }
+    else{           // Pause
+        config_pwm_OC1(0,7999);
+        steps = 0;
+        state = READY;
+        //_LATA2 = 1;
+    }
+    
+}
+
+void config_ad_pin6(void)
+{
+    
+    _ADON = 0;    // AD1CON1<15> -- Turn off A/D during config
+    
+    // AD1CON1 register
+    _ADSIDL = 0;  // AD1CON1<13> -- A/D continues in idle mode
+    _MODE12 = 1;  // AD1CON1<10> -- 12-bit A/D operation
+    _FORM = 0;    // AD1CON1<9:8> -- Unsigned integer output
+    _SSRC = 7;    // AD1CON1<7:4> -- Auto conversion (internal counter)
+    _ASAM = 1;    // AD1CON1<2> -- Auto sampling
+
+    // AD1CON2 register
+    _PVCFG = 0;   // AD1CON2<15:14> -- Use VDD as positive
+                  // ref voltage
+    _NVCFG = 0;   // AD1CON2<13> -- Use VSS as negative
+                  // ref voltage
+    _BUFREGEN = 1;// AD1CON2<11> -- Result appears in buffer
+                  // location corresponding to channel
+    _CSCNA = 1;   // AD1CON2<10> -- Scans inputs specified
+                  // in AD1CSSx registers
+    _SMPI = 3;  // AD1CON2<6:2> -- Every 4th conversion sent
+                  // to buffer (if sampling 4 channels)
+    _ALTS = 0;    // AD1CON2<0> -- Sample MUXA only
+
+    // AD1CON3 register
+    _ADRC = 0;    // AD1CON3<15> -- Use system clock
+    _SAMC = 0;    // AD1CON3<12:8> -- Auto sample every A/D
+                  // period TAD
+    _ADCS = 0x3F; // AD1CON3<7:0> -- A/D period TAD = 64*TCY
+
+    // AD1CSS registers
+    // SET THE BITS CORRESPONDING TO CHANNELS THAT YOU WANT
+    // TO SAMPLE
+    _CSS4 = 1; //pin 6
+
+    _ADON = 1;    // AD1CON1<15> -- Turn on A/D
+}
+
+void driveMovement (int direction1, int direction2, int speed, double rotations){
+    config_pwm_OC1(speed / 2 + 1,speed);
+    _LATA0 = direction1;
+    _LATA1 = direction2;
+//    if(direction == CW){
+//        _LATA2 = CW;
+//    }
+//    else{
+//        _LATA2 = CCW;
+//    }
+    endSteps = rotations * 1600;
+}
+
+void config_pwm_OC1 (int duty, int period) {
+    //-----------------------------------------------------------
+    // CONFIGURE PWM1 USING OC1 (on pin 14)
+    
+    // Set period and duty cycle
+    // CHOOSE PERIOD AND DUTY CYCLE HERE
+    OC1R = duty;
+    OC1RS = period;
+
+    // Clear control bits
+    OC1CON1 = 0;
+    OC1CON2 = 0;
+    
+    // Configure OC1
+    OC1CON1bits.OCTSEL = 0b111;
+    OC1CON2bits.SYNCSEL = 0x1F; 
+    OC1CON2bits.OCTRIG = 0;     
+    OC1CON1bits.OCM = 0b110;
+
+}
+
+
+int main(void) {
+    // Configure PORTB for digital input (disable analog input)
+    ANSB = 0x000;
+    
+    // Configure all bits of PORTA as outputs
+    TRISA = 0x000000;
+
+    // Configure all bits of PORTB as inputs
+    TRISB = 0xFFFF;
+
+    config_pwm_OC1(4000,7999);
+    
+    _OC1IP = 4;
+    _OC1IE = 1;
+    _OC1IF = 0;
+    
+    // debug
+    _LATA2 = 0;
+    
+     // Configure A/D
+    config_ad_pin6();
+    
+    //configure led light
+    _TRISA0 = 0;
+    _ANSA0 = 0;
+    
+    
+    int IRValue = 0;
+    
+    
+    // Start by driving forward from zero position to shooting position
+    int litG = 4;
+    int curG = 1;
+    state = WORKING;
+    driveMovement(FORWARD, FORWARD, 7999, 2.75);
+        
+    while(1){
+        // Rotation and such
+        IRValue = ADC1BUF4;
+        if (litG != curG) {
+            if(state == READY && IRValue<=200){
+                state = WORKING;
+                if (curG < 2) {
+                    driveMovement(FORWARD, BACK, 7999, 0.9);
+                    curG++;
+                }
+                else {
+                    driveMovement(BACK, FORWARD, 7999, 2*0.9);
+                    curG = 0;
+                }
+            }
+            else if (state == READY && IRValue>200) {
+                litG = curG;
+                //Shooting function
+            }
+        }
+    }
+    return 0;
+}
